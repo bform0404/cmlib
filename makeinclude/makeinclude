@@ -1,0 +1,175 @@
+############################
+#### user target define ####
+ifdef USER_BIN
+  BIN = $(USER_BIN)
+endif
+ifdef USER_LIB
+  LIB = lib$(USER_LIB).a
+endif
+ifdef USER_DLL
+  DLL = lib$(USER_DLL).so
+endif
+
+#################################
+#### user output path define ####
+ifdef USER_OBJ_DIR
+  OBJDIR = $(USER_OBJ_DIR)
+else
+  OBJDIR = .
+endif
+ifdef USER_DEP_DIR
+  DEPDIR = $(USER_DEP_DIR)
+else
+  DEPDIR = $(USER_OBJ_DIR)/dep
+endif
+ifdef USER_LIB_DIR
+  LIB_DIR = $(USER_LIB_DIR)
+else
+  LIB_DIR = .
+endif
+ifdef USER_DLL_DIR
+  DLL_DIR = $(USER_DLL_DIR)
+else
+  DLL_DIR = .
+endif
+ifdef USER_BIN_DIR
+  BIN_DIR = $(USER_BIN_DIR)
+else
+  BIN_DIR = .
+endif
+
+###############################
+#### golble compile option ####
+CC  = gcc
+CPP = g++
+LINUX_FLAGS = -Wall -Wpointer-arith -pipe
+CFLAGS  += $(LINUX_FLAGS)
+CPPFLAGS += $(LINUX_FLAGS)
+LD      = $(CXX)
+LIBS    += -ldl -lnsl -lresolv #-lcurses
+LIBS	+= $(shell test -e /usr/lib/librt.so && echo -lrt)
+AR      = ar
+ARFLAGS = rsuv
+RM      = rm -rf 
+
+#############################
+#### user compile option ####
+INCLDIRS += $(USER_INCLDIRS)
+DEFFLAGS += $(USER_DEFFLAGS) 
+LIBS += $(USER_LINK_LIBS)
+DLLS += $(USER_LINK_DLLS) 
+CFLAGS += $(DEFFLAGS) $(INCLDIRS) 
+CPPFLAGS += $(DEFFLAGS) $(INCLDIRS) 
+
+###################################
+#### compile and link commands ####
+COMPILE.cc  = $(CC) $(CFLAGS) -c -O3 -gstabs+ -DNDEBUG -static -static-libgcc
+COMPILE.cpp = $(CXX) $(CPPFLAGS) -c -O3 -gstabs+ -ggdb3 -DNDEBUG -static -static-libgcc
+DEPEND.cc	= $(CC) $(CFLAGS) -MM
+DEPEND.cpp	= $(CXX) $(CPPFLAGS) -MM
+LINK.cc  = $(LD) $(CFLAGS) $(LDFLAGS) -static-libgcc #-static
+LINK.cpp = $(LD) $(CPPFLAGS) $(LDFLAGS) -static-libgcc #-static
+
+###################################
+#### user defined source files ####
+ifdef USER_SRCS
+  OBJS += $(addsuffix .o, $(addprefix $(OBJDIR)/, $(basename $(notdir $(USER_SRCS)))))
+  DEPS += $(addsuffix .d, $(addprefix $(DEPDIR)/, $(basename $(notdir $(USER_SRCS)))))
+  CLEANUP += $(OBJS) $(DEPS)
+  CHECK_DIRS += $(OBJDIR) $(DEPDIR)
+endif
+
+#######################################
+#### user defind target output path####
+ifdef LIB
+  VLIB = $(LIB_DIR)/$(LIB)
+  CLEANUP += $(VLIB)
+  CHECK_DIRS += $(LIB_DIR)
+endif
+ifdef BIN
+  VBIN = $(BIN_DIR)/$(BIN)
+  CLEANUP += $(VBIN)
+  CHECK_DIRS += $(BIN_DIR)
+endif
+ifdef DLL
+  VDLL = $(DLL_DIR)/$(DLL)
+  CLEANUP += $(VDLL)
+  CHECK_DIRS += $(DLL_DIR)
+endif
+
+##########################################
+#### user_defined makefile and sub_dir ####
+ifdef USER_MAKEFILE_NAME
+  MAKEFILE = $(USER_MAKEFILE_NAME)
+else
+  MAKEFILE = Makefile
+endif
+ifdef USER_SUB_DIRS
+  SUB_DIRS = $(addsuffix .subdirs, $(USER_SUB_DIRS))
+else
+  SUB_DIRS =
+endif
+
+#######################
+#### rules to make ####
+TARGETS_LOCAL  = all.local clean.local
+TARGETS_NESTED = $(TARGETS_LOCAL:.local=.nested)
+
+all: all.nested all.local
+clean: clean.nested clean.local
+
+all.local: check_dir $(VBIN) $(VLIB) $(VDLL) $(OBJS) #$(DEPS)
+
+check_dir: $(CHECK_DIRS)
+
+$(CHECK_DIRS):
+	@test -d $@ || mkdir -p $@ 
+
+$(VLIB): $(OBJS) $(USER_LINK_LIBS)
+	$(AR) $(ARFLAGS) $@ $(OBJS) $(USER_LINK_LIBS)
+	-chmod a+r $@
+$(VDLL): $(OBJS) $(VLIB) 
+	$(CC) -shared -o $@ $(OBJS) $(USER_LINK_LIBS)
+$(VBIN): $(OBJS) $(VLIB) $(LIBS)
+	$(LINK.cpp) -o $@ $(OBJS) $(VLIB) $(LIBS) $(DLLS)
+
+$(OBJDIR)/%.o: %.c
+	$(COMPILE.cc) -o $@ $<
+$(OBJDIR)/%.o: %.cpp
+	$(COMPILE.cpp) -o $@ $<
+
+
+$(DEPDIR)/%.d: %.c
+	@set -e; rm -f $@; \
+	$(DEPEND.cc) $< > $@.$$$$; \
+	sed 's,\($*\)\.o[ :]*,$(OBJDIR)/\1.o $@ : ,g' < $@.$$$$ > $@; \
+	rm -f $@.$$$$
+$(DEPDIR)/%.d: %.cpp
+	@set -e; rm -f $@; \
+	$(DEPEND.cpp) $< > $@.$$$$; \
+	sed 's,\($*\)\.o[ :]*,$(OBJDIR)/\1.o $@ : ,g' < $@.$$$$ > $@; \
+	rm -f $@.$$$$
+
+-include $(DEPS)
+
+clean.local:
+ifneq ($(CLEANUP),)
+	$(RM) $(CLEANUP)
+endif
+
+#######################################
+#### nested makefiles for sub dirs ####
+%.mmakefiles: %
+	$(MAKE) -f $< $(MMAKEFILES_TARGET)
+%.subdirs: %
+	$(MAKE) -C $< $(SUBDIRS_TARGET) -f $(MAKEFILE)
+
+$(TARGETS_NESTED):
+ifdef MULTI_MAKEFILES
+	$(MAKE) -f $(MAKEFILE) MMAKEFILES_TARGET=$(@:.nested=) $(MULTI_MAKEFILES)
+endif
+
+ifdef SUB_DIRS
+	$(MAKE) -f $(MAKEFILE) SUBDIRS_TARGET=$(@:.nested=) $(SUB_DIRS)
+endif
+
